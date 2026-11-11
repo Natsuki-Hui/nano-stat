@@ -93,9 +93,19 @@ const MAX_FRAME_SAMPLES: usize = 2048;
 /// 计算 1% Low 所需的最少帧数（帧太少时百分位无统计意义）
 const MIN_FRAME_SAMPLES: usize = 20;
 
-/// 目标进程的帧时间戳环形缓冲（Instant，Windows 底层即 QPC，由 ETW 回调写入）
+/// 目标进程的帧时间戳环形缓冲（QPC tick，事件自带的发生时刻，
+/// 而非回调处理时刻——ETW 实时会话是批量投递的，处理时刻会整批相同）
 /// 只记录通过 PID 过滤后的帧，保证 1% Low 只反映目标进程（游戏）的帧率波动
-static FRAME_TIMESTAMPS: Lazy<Mutex<VecDeque<Instant>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
+static FRAME_TIMESTAMPS: Lazy<Mutex<VecDeque<u64>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
+
+/// QPC 频率（ticks per second），首次使用时初始化
+static QPC_FREQ: Lazy<u64> = Lazy::new(|| {
+    unsafe {
+        let mut freq = 0i64;
+        let _ = windows::Win32::System::Performance::QueryPerformanceFrequency(&mut freq);
+        freq as u64
+    }
+});
 
 /// ETW 事件回调（在 ProcessTrace 的线程上执行，要求极快返回）
 unsafe extern "system" fn on_event(record: *mut EVENT_RECORD) {
@@ -120,22 +130,22 @@ unsafe extern "system" fn on_event(record: *mut EVENT_RECORD) {
         return;
     }
 
-    // 过滤目标进程（0 = 不过滤）
+    // 过滤目标进程（0 = 不过滤）。目标进程过滤时只统计目标进程帧；
+    // 全局统计（target=0）时所有进程的 Present 都计入计数与帧缓冲
     let pid = shared.target_pid.load(Ordering::Relaxed);
     if pid != 0 && header.ProcessId != pid {
         return;
     }
 
-    shared.present_count.fetch_add(1, Ordering::Relaxed);
-
-    // 记录帧时间戳（Instant 底层是 QPC，开销 ~20ns，每帧一次可忽略）：
-    // 回调要求极快返回，这里只做一次环形缓冲追加（满则丢弃最旧一帧）
+    // 事件自带的 QPC 发生时刻（ClientContext=1 时 TimeStamp 单位是 QPC tick）
+    let ts = header.TimeStamp as u64;
     if let Ok(mut stamps) = FRAME_TIMESTAMPS.lock() {
         if stamps.len() >= MAX_FRAME_SAMPLES {
             stamps.pop_front();
         }
-        stamps.push_back(Instant::now());
+        stamps.push_back(ts);
     }
+    shared.present_count.fetch_add(1, Ordering::Relaxed);
 }
 
 /// 设置目标进程（前台游戏），None 表示统计所有进程的 Present
@@ -173,13 +183,50 @@ pub fn settle_fps() {
     };
 
     let count = SHARED.present_count.swap(0, Ordering::Relaxed);
-    let fps = count as f64 / elapsed.as_secs_f64();
+    let target = SHARED.target_pid.load(Ordering::Relaxed);
+
+    // FPS 优先从帧时间戳差分计算（与 1% Low 同一数据源，口径一致）：
+    // ETW 实时会话是批量投递的，present_count（事件到达速率）会把同一批
+    // 事件压在同一秒边界上导致 FPS 失真（如游戏内显示 1）。
+    // 帧时间戳用事件自带 QPC 发生时刻，不受投递批次影响。
+    let qpc_fps = {
+        let stamps = FRAME_TIMESTAMPS.lock().unwrap();
+        if stamps.len() >= 2 {
+            // 取缓冲尾部约 2 秒内的帧计算瞬时帧率
+            let freq = *QPC_FREQ as f64;
+            let mut rev = stamps.iter().rev();
+            let last = *rev.next().unwrap();
+            let mut taken = 1usize;
+            let mut first = last;
+            for &ts in rev {
+                let span_ms = (last.saturating_sub(ts)) as f64 / freq * 1000.0;
+                if span_ms > 2000.0 {
+                    break;
+                }
+                first = ts;
+                taken += 1;
+            }
+            if taken >= 2 {
+                let span_ms = (last.saturating_sub(first)) as f64 / freq * 1000.0;
+                if span_ms > 50.0 {
+                    Some((taken - 1) as f64 / span_ms * 1000.0)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    let fps = qpc_fps.unwrap_or_else(|| count as f64 / elapsed.as_secs_f64());
     *SHARED.last_fps.lock().unwrap() = Some(fps);
 
     // 智能回退：前台进程连续 3 秒无帧（如浏览器渲染在 GPU 子进程）时，
     // 回退为统计所有进程的 Present，保证桌面场景 FPS 始终有值。
     // 切回前台（目标 PID 变化）时 set_target_pid 会重置，游戏场景依然精确。
-    let target = SHARED.target_pid.load(Ordering::Relaxed);
     if target != 0 && count == 0 {
         let zeroes = ZERO_FRAME_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
         if zeroes >= 3 {
@@ -190,9 +237,10 @@ pub fn settle_fps() {
         ZERO_FRAME_COUNT.store(0, Ordering::Relaxed);
     }
 
-    // 帧时间统计：仅目标进程明确（游戏前台，未回退）时计算 1% Low / 平均帧时间。
-    // 回退为统计所有进程时缓冲混入桌面帧，1% Low 无意义，置 None。
-    if target != 0 {
+    // 帧时间统计：仅游戏前台（未回退）时计算 1% Low / 平均帧时间。
+    // 桌面场景 DWM 合成器批量投递 Present 事件，帧间隔不可信，1% Low 置 None。
+    let target_now = SHARED.target_pid.load(Ordering::Relaxed);
+    if target_now != 0 {
         let (fps_1pct, frame_time) = compute_frame_stats();
         *SHARED.last_fps_1pct.lock().unwrap() = fps_1pct;
         *SHARED.last_frame_time.lock().unwrap() = frame_time;
@@ -213,18 +261,23 @@ fn compute_frame_stats() -> (Option<f64>, Option<f64>) {
         return (None, None);
     }
 
-    // 相邻帧间隔 → 毫秒（Instant 差值）
+    let freq = *QPC_FREQ as f64; // ticks per second
+
+    // 相邻帧间隔 → 毫秒（QPC tick 差值换算）。
+    // 间隔 >500ms 视为「应用无渲染/桌面空闲」的挂起间隙（如切出游戏、画面静止），
+    // 不是真实卡顿帧；混入会把 p99 推到 ≈1000ms 使 1% Low 失效，故先剔除。
     let mut diffs: Vec<f64> = stamps
         .iter()
         .zip(stamps.iter().skip(1))
-        .map(|(&a, &b)| b.duration_since(a).as_secs_f64() * 1000.0)
+        .map(|(&a, &b)| (b.saturating_sub(a)) as f64 / freq * 1000.0)
+        .filter(|&ms| ms > 0.5 && ms < 500.0)
         .collect();
 
     if diffs.len() < MIN_FRAME_SAMPLES {
         return (None, None);
     }
 
-    // 平均帧时间：窗口总时长 / 帧间隔数（与 FPS 互为倒数，口径一致）
+    // 平均帧时间：间隔均值（与 FPS 互为倒数口径一致）
     let avg_ms = diffs.iter().sum::<f64>() / diffs.len() as f64;
 
     // 99 百分位帧时间：升序排序后取 99% 分位索引（最慢的 1% 帧）
@@ -254,6 +307,22 @@ pub fn get_fps_1pct() -> Option<f64> {
 /// 获取最近结算的平均帧时间 (ms)
 pub fn get_frame_time() -> Option<f64> {
     *SHARED.last_frame_time.lock().unwrap()
+}
+
+
+/// 强制停止本应用的残留 ETW 实时会话（进程被强杀后会话残留，需显式清理）
+pub fn stop_all_trace_sessions() {
+    unsafe {
+        let session = PCWSTR(SESSION_NAME.as_ptr());
+        let mut stop_props: EVENT_TRACE_PROPERTIES = std::mem::zeroed();
+        stop_props.Wnode.BufferSize = std::mem::size_of::<EVENT_TRACE_PROPERTIES>() as u32;
+        let _ = StopTraceW(CONTROLTRACE_HANDLE::default(), session, &mut stop_props);
+
+        let pm_session: Vec<u16> = "NanoStatPM".encode_utf16().chain(Some(0)).collect();
+        let mut pm_props: EVENT_TRACE_PROPERTIES = std::mem::zeroed();
+        pm_props.Wnode.BufferSize = std::mem::size_of::<EVENT_TRACE_PROPERTIES>() as u32;
+        let _ = StopTraceW(CONTROLTRACE_HANDLE::default(), PCWSTR(pm_session.as_ptr()), &mut pm_props);
+    }
 }
 
 /// 启动 ETW FPS 监听（幂等）

@@ -26,6 +26,7 @@ const navItems: { id: NavItem; label: string; icon: typeof Cpu }[] = [
   { id: 'about', label: '关于', icon: Info },
 ];
 
+/** 主窗口左侧导航栏（硬件信息/游戏内监控/关于） */
 export function Sidebar({ activeItem, onNavigate, collapsed, onToggleCollapse }: SidebarProps) {
   return (
     <aside 

@@ -4,7 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { HardwareOverview, RealtimeStats, MonitorSettings, MonitorPosition } from '../types/hardware';
+import type { HardwareOverview, RealtimeStats, MonitorSettings } from '../types/hardware';
 
 /**
  * 获取硬件概览信息
@@ -66,12 +66,4 @@ export async function showOverlayWindow(): Promise<void> {
  */
 export async function hideOverlayWindow(): Promise<void> {
   await invoke('hide_overlay_window');
-}
-
-/**
- * 更新悬浮窗口位置
- * @param position 新的位置
- */
-export async function updateOverlayPosition(position: MonitorPosition): Promise<void> {
-  await invoke('update_overlay_position_cmd', { position });
 }

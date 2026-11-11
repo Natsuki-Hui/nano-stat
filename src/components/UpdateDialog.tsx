@@ -51,6 +51,7 @@ const contentMotion = {
   transition: { duration: 0.2, ease: 'easeOut' as const },
 };
 
+/** 更新对话框（展示新版本信息与安装引导，便携版不显示） */
 export function UpdateDialog({ open, onOpenChange, updateInfo, portable, onInstall, installing }: UpdateDialogProps) {
   // 便携版渠道弹窗不依赖更新信息（无 updateInfo 也可渲染）
   if (!updateInfo && !portable) return null;

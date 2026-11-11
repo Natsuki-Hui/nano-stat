@@ -23,12 +23,13 @@ namespace LhmBridge;
 [JsonSerializable(typeof(TempSnapshot))]
 internal partial class JsonContext : JsonSerializerContext { }
 
-/// <summary>温度快照</summary>
+/// <summary>温度/功耗快照</summary>
 class TempSnapshot
 {
     public double? cpu_temp { get; set; }
     public double? gpu_temp { get; set; }
     public double? mb_temp { get; set; }
+    public double? cpu_power { get; set; }
     public long timestamp { get; set; }
 }
 
@@ -166,19 +167,20 @@ class Program
         return 0;
     }
 
-    /// <summary>遍历硬件树，收集温度传感器</summary>
+    /// <summary>遍历硬件树，收集温度与 CPU 功耗传感器</summary>
     static TempSnapshot Collect(Computer computer)
     {
         double? cpuTemp = null;
         double? gpuTemp = null;
         double? mbTemp = null;
+        double? cpuPower = null;
 
         foreach (var hardware in computer.Hardware)
         {
-            Walk(hardware, ref cpuTemp, ref gpuTemp, ref mbTemp);
+            Walk(hardware, ref cpuTemp, ref cpuPower, ref gpuTemp, ref mbTemp);
             foreach (var sub in hardware.SubHardware)
             {
-                Walk(sub, ref cpuTemp, ref gpuTemp, ref mbTemp);
+                Walk(sub, ref cpuTemp, ref cpuPower, ref gpuTemp, ref mbTemp);
             }
         }
 
@@ -187,41 +189,60 @@ class Program
             cpu_temp = cpuTemp,
             gpu_temp = gpuTemp,
             mb_temp = mbTemp,
+            cpu_power = cpuPower,
             timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
         };
     }
 
-    /// <summary>遍历单个硬件节点，取温度最高的传感器</summary>
+    /// <summary>遍历单个硬件节点：温度取最高值，CPU 功耗取 Package 传感器</summary>
     static void Walk(
         IHardware hardware,
         ref double? cpuTemp,
+        ref double? cpuPower,
         ref double? gpuTemp,
         ref double? mbTemp)
     {
         foreach (var sensor in hardware.Sensors)
         {
-            if (sensor.SensorType != SensorType.Temperature || !sensor.Value.HasValue)
+            if (!sensor.Value.HasValue)
                 continue;
-
-            var temp = sensor.Value!.Value;
+            var value = sensor.Value!.Value;
 
             switch (hardware.HardwareType)
             {
                 case HardwareType.Cpu:
-                    // 优先 "Package"（封装温度，最接近真实 CPU 温度），
-                    // 没有 Package 时才取最大核心温度
-                    if (sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase))
+                    if (sensor.SensorType == SensorType.Power)
                     {
-                        cpuTemp = temp;
+                        // 优先 "Package"（封装功耗，即整颗 CPU 的功耗），
+                        // 没有 Package 时取最大功耗传感器兜底
+                        if (sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase))
+                        {
+                            cpuPower = Math.Max(cpuPower ?? double.MinValue, value);
+                        }
+                        else if (cpuPower is null)
+                        {
+                            cpuPower = Math.Max(cpuPower ?? double.MinValue, value);
+                        }
                     }
-                    else if (cpuTemp is null)
+                    else if (sensor.SensorType == SensorType.Temperature)
                     {
-                        cpuTemp = Math.Max(cpuTemp ?? double.MinValue, temp);
+                        // 优先 "Package"（封装温度，最接近真实 CPU 温度），
+                        // 没有 Package 时才取最大核心温度
+                        if (sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase))
+                        {
+                            cpuTemp = value;
+                        }
+                        else if (cpuTemp is null)
+                        {
+                            cpuTemp = Math.Max(cpuTemp ?? double.MinValue, value);
+                        }
                     }
                     break;
                 case HardwareType.GpuNvidia:
                 case HardwareType.GpuAmd:
                 case HardwareType.GpuIntel:
+                    if (sensor.SensorType != SensorType.Temperature)
+                        break;
                     // 跳过热点传感器：Hot Spot / Junction 是芯片最热点，通常比核心温度高 10~15°C，
                     // 任务管理器 / NVML 显示的是 GPU Core（核心温度），需与其对齐
                     if (sensor.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase) ||
@@ -230,12 +251,15 @@ class Program
                     // 优先 "Core"（核心温度，与任务管理器一致），
                     // 无 Core 时取剩余温度最大值兜底（部分集显仅暴露单一温度传感器）
                     if (sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase))
-                        gpuTemp = temp;
+                        gpuTemp = value;
                     else if (gpuTemp is null)
-                        gpuTemp = Math.Max(gpuTemp ?? double.MinValue, temp);
+                        gpuTemp = Math.Max(gpuTemp ?? double.MinValue, value);
                     break;
                 case HardwareType.Motherboard:
-                    mbTemp = Math.Max(mbTemp ?? double.MinValue, temp);
+                    if (sensor.SensorType == SensorType.Temperature)
+                    {
+                        mbTemp = Math.Max(mbTemp ?? double.MinValue, value);
+                    }
                     break;
             }
         }

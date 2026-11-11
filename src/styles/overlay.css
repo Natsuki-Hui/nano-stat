@@ -1,4 +1,11 @@
-/* 悬浮监控面板样式 */
+/* OSD 悬浮窗专用样式
+ *
+ * 面板条样式（.overlay-panel 及其子元素）在 styles/monitor-bar.css 中定义，
+ * 由本文件 @import 引入同一份——OSD 与设置页预览共用，渲染永远一致。
+ * 本文件只保留 OSD 窗口独有的：透明层布局、屏幕边缘吸附、body 重置。
+ */
+
+@import './monitor-bar.css';
 
 * {
   box-sizing: border-box;
@@ -7,86 +14,30 @@
 html, body, #root {
   width: 100%;
   height: 100%;
+  /* overlay.html 不引入 globals.css（无 Tailwind reset），
+     必须显式清掉浏览器默认的 body 8px 外边距，否则整条会被顶开 */
+  margin: 0;
+  padding: 0;
   background: transparent !important;
   overflow: hidden;
 }
 
+/* flex 容器：面板收缩包裹内容，按 settings.position 吸附到屏幕对应边缘 */
+#root {
+  display: flex;
+}
+
+/* 位置吸附：面板在整屏透明层内的对齐（由 settings.position 注入 pos-* 类） */
+#root:has(.pos-TopCenter) { justify-content: center; align-items: flex-start; }
+#root:has(.pos-TopLeft) { justify-content: flex-start; align-items: flex-start; }
+#root:has(.pos-TopRight) { justify-content: flex-end; align-items: flex-start; }
+#root:has(.pos-BottomCenter) { justify-content: center; align-items: flex-end; }
+#root:has(.pos-BottomLeft) { justify-content: flex-start; align-items: flex-end; }
+#root:has(.pos-BottomRight) { justify-content: flex-end; align-items: flex-end; }
+#root:has(.pos-LeftCenter) { justify-content: flex-start; align-items: center; }
+#root:has(.pos-RightCenter) { justify-content: flex-end; align-items: center; }
+
 body {
-  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-
-/* 悬浮面板容器
-   注意：透明度只作用于背景（--panel-bg-alpha），文字指标始终不透明；
-   边框/阴影也跟随 alpha，透明度高时不会出现突兀的黑边 */
-.overlay-panel {
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  /* 背景 alpha 由前端根据设置注入，默认 0.95 */
-  background: rgba(20, 25, 32, var(--panel-bg-alpha, 0.95));
-  backdrop-filter: blur(10px);
-  /* 边框透明度与背景联动（乘 0.6 保持原有层次），透明面板不显黑边 */
-  border: 1px solid rgba(55, 65, 81, calc(var(--panel-bg-alpha, 0.95) * 0.6));
-  border-radius: 6px;
-  padding: 8px 14px;
-  color: #f7fafc !important;
-  /* 文字大小由设置注入（--panel-font-size），label/value 用 em 跟随 */
-  font-size: var(--panel-font-size, 12px);
-  line-height: 1.2;
-  /* 阴影随透明度减弱，避免透明时出现黑色边缘 */
-  box-shadow: 0 2px 8px rgba(0, 0, 0, calc(var(--panel-bg-alpha, 0.95) * 0.4));
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 水平布局（顶部/底部/四角） */
-.overlay-horizontal {
-  flex-direction: row;
-  gap: 1.1em;
-  height: 100%;
-}
-
-/* 垂直布局（左侧/右侧） */
-.overlay-vertical {
-  flex-direction: column;
-  height: auto;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 0.35em;
-  padding: 8px 12px;
-}
-
-/* 监控项 */
-.monitor-item {
-  display: flex;
-  align-items: center;
-  gap: 0.3em;
-}
-
-.overlay-vertical .monitor-item {
-  width: 100%;
-  justify-content: space-between;
-}
-
-.monitor-label {
-  color: #f7fafc;
-  font-size: 0.92em;
-  font-weight: 500;
-}
-
-.monitor-value {
-  font-weight: 700;
-  font-size: 1em;
-}
-
-/* 颜色类 */
-.text-cpu { color: #0ea5e9; }
-.text-gpu { color: #10b981; }
-.text-temp { color: #f59e0b; }
-.text-memory { color: #a855f7; }
-.text-network { color: #3b82f6; }
-.text-fps { color: #eab308; }

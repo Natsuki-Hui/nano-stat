@@ -11,6 +11,7 @@ interface MemoryCardProps {
   memory: MemoryInfo;
 }
 
+/** 硬件概览页内存卡片：容量/已用/可用 */
 export function MemoryCard({ memory }: MemoryCardProps) {
   // 转换为 GB 显示
   const totalGB = (memory.total / 1024).toFixed(0);

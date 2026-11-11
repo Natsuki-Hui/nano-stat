@@ -9,14 +9,15 @@
  * - framer-motion 过渡动画
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type PointerEvent } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Monitor, Settings2, Eye, Sun, Moon, Laptop } from 'lucide-react';
-import type { MonitorSettings, MonitorPosition, DisplayItems } from '../types/hardware';
-import { showOverlayWindow, hideOverlayWindow, updateOverlayPosition, updateMonitorSettings } from '../api/hardware';
+import { X, Monitor, Settings2, Eye, Sun, Moon, Laptop, ArrowUp, ArrowDown, GripVertical } from 'lucide-react';
+import type { MonitorSettings, MonitorPosition } from '../types/hardware';
+import { showOverlayWindow, hideOverlayWindow, updateMonitorSettings } from '../api/hardware';
 import { useTheme, type ThemeMode } from '../hooks/useTheme';
 import { Checkbox } from './ui/Checkbox';
+import { ITEM_LABELS, resolveItemOrder, type ItemKey } from '../utils/overlayItems';
 
 interface SettingsDialogProps {
   /** 弹窗是否打开 */
@@ -72,6 +73,7 @@ const contentMotion = {
   transition: { duration: 0.2, ease: 'easeOut' as const },
 };
 
+/** 游戏内监控设置对话框：显示项开关/拖拽排序/刷新间隔/透明度等 */
 export function SettingsDialog({ open, onOpenChange, settings, onSave }: SettingsDialogProps) {
   // 本地状态，用于编辑
   const [localSettings, setLocalSettings] = useState<MonitorSettings>(settings);
@@ -89,8 +91,12 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave }: Setting
   }, [settings]);
 
   // 实时预览：本地设置变更后防抖同步到后端，
-  // overlay 监听 settings-changed 事件即时更新（透明度/显示项/刷新间隔等）
+  // overlay 监听 settings-changed 事件即时更新（透明度/显示项/刷新间隔等）。
+  // 引用相等守卫：挂载回声与外部同步（未实际变化）不触发写盘
   useEffect(() => {
+    if (localSettings === settingsRef.current) {
+      return;
+    }
     if (debounceRef.current) {
       window.clearTimeout(debounceRef.current);
     }
@@ -127,23 +133,78 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave }: Setting
     }
   };
 
-  // 处理位置变更 - 立即更新悬浮窗口位置（移动窗口 + 持久化）
-  const handlePositionChange = async (position: MonitorPosition) => {
-    const next = { ...settingsRef.current, position };
-    updateLocalSettings(next);
-    try {
-      await updateOverlayPosition(position);
-    } catch (err) {
-      console.error('Failed to update overlay position:', err);
-    }
+  // 处理位置变更 - 面板由前端 CSS 吸附定位，settings-changed 事件即时生效
+  const handlePositionChange = (position: MonitorPosition) => {
+    updateLocalSettings({ ...settingsRef.current, position });
   };
 
-  // 处理显示项变更
-  const handleDisplayItemChange = (key: keyof DisplayItems, value: boolean) => {
+  // 处理细项开关变更（每个指标独立开关）
+  const handleDisplayItemChange = (key: ItemKey, value: boolean) => {
     updateLocalSettings({
       ...settingsRef.current,
       display_items: { ...settingsRef.current.display_items, [key]: value },
     });
+  };
+
+  // 处理显示项排序变更（拖拽换位或 ↑↓ 点击后触发，实时同步悬浮窗）
+  const handleReorder = (newOrder: ItemKey[]) => {
+    updateLocalSettings({ ...settingsRef.current, item_order: newOrder });
+  };
+
+  // 拖拽排序：基于 Pointer 事件手动实现。
+  // 不用 HTML5 原生 DnD（WebView2 内 dragstart 不可靠）、不用 framer 投影，
+  // 只依赖 pointermove + getBoundingClientRect，任何环境都稳定工作。
+  const dragState = useRef<{ key: ItemKey } | null>(null);
+  const [draggingKey, setDraggingKey] = useState<ItemKey | null>(null);
+  const rowRefs = useRef(new Map<ItemKey, HTMLDivElement>());
+
+  const handleGripPointerDown = (key: ItemKey) => (e: PointerEvent<HTMLDivElement>) => {
+    e.preventDefault(); // 阻止文本选择与原生拖拽
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragState.current = { key };
+    setDraggingKey(key);
+  };
+
+  const handleGripPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const ds = dragState.current;
+    if (!ds) return;
+    const cur = resolveItemOrder(settingsRef.current.item_order);
+    // 找指针当前落在哪一行，按行上半/下半决定插到其前/后
+    let target: ItemKey | null = null;
+    let before = false;
+    for (const k of cur) {
+      if (k === ds.key) continue;
+      const el = rowRefs.current.get(k);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (e.clientY >= r.top && e.clientY <= r.bottom) {
+        target = k;
+        before = e.clientY < r.top + r.height / 2;
+        break;
+      }
+    }
+    if (!target) return;
+    const next = cur.filter(k => k !== ds.key);
+    next.splice(next.indexOf(target) + (before ? 0 : 1), 0, ds.key);
+    if (next.join('|') !== cur.join('|')) {
+      handleReorder(next);
+    }
+  };
+
+  const endDrag = () => {
+    dragState.current = null;
+    setDraggingKey(null);
+  };
+
+  // 处理显示项排序变更（↑ 上移 / ↓ 下移，实时同步悬浮窗）
+  const handleMoveItem = (key: ItemKey, dir: -1 | 1) => {
+    const current = resolveItemOrder(settingsRef.current.item_order);
+    const idx = current.indexOf(key);
+    const target = idx + dir;
+    if (idx === -1 || target < 0 || target >= current.length) return;
+    const next = [...current];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    updateLocalSettings({ ...settingsRef.current, item_order: next });
   };
 
   // 处理刷新间隔变更
@@ -193,10 +254,12 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave }: Setting
               <motion.div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" {...overlayMotion} />
             </Dialog.Overlay>
 
-            {/* 弹窗内容 */}
-            <Dialog.Content forceMount asChild>
+            {/* 弹窗内容（flex 包裹层居中，不依赖 translate，
+                避免 framer-motion 动画覆写 transform 后弹窗/内容错位） */}
+            <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+              <Dialog.Content forceMount asChild className="pointer-events-auto">
               <motion.div
-                className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[50vw] min-w-[560px] max-w-[900px] max-h-[85vh] rounded-xl shadow-2xl z-50 overflow-hidden bg-[var(--color-bg-card)] border border-[var(--color-border)]"
+                className="w-[50vw] min-w-[560px] max-w-[900px] max-h-[85vh] rounded-xl shadow-2xl overflow-hidden bg-[var(--color-bg-card)] border border-[var(--color-border)]"
                 {...contentMotion}
               >
                 {/* 标题栏 */}
@@ -220,8 +283,10 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave }: Setting
                   </Dialog.Close>
                 </div>
 
-                {/* 设置内容 */}
-                <div className="p-6 flex flex-col gap-6 overflow-y-auto max-h-[60vh]">
+                {/* 设置内容（固定高度滚动区，几何确定） */}
+                <motion.div
+                  className="p-6 flex flex-col gap-6 overflow-y-auto h-[60vh]"
+                >
                   {/* 游戏内监控开关 */}
                   <div
                     className="flex items-center justify-between rounded-lg p-4 bg-[var(--color-bg-input)] border border-[var(--color-border)]"
@@ -275,36 +340,70 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave }: Setting
                     </div>
                   </div>
 
-                  {/* 显示项目 - 可复用主题化 Checkbox */}
+                  {/* 显示项目 - 拖拽排序（framer-motion Reorder）+ ↑↓ 微调 */}
                   <div>
-                    <p className="text-sm font-medium text-[var(--color-text-primary)] mb-3">显示项目</p>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      {[
-                        { key: 'cpu' as const, label: 'CPU 使用率' },
-                        { key: 'cpu_temp' as const, label: 'CPU 温度' },
-                        { key: 'gpu' as const, label: 'GPU 使用率' },
-                        { key: 'gpu_temp' as const, label: 'GPU 温度' },
-                        { key: 'memory' as const, label: '内存使用率' },
-                        { key: 'network' as const, label: '网络速率' },
-                        { key: 'fps' as const, label: '帧率 (FPS)' },
-                        { key: 'fps_1pct' as const, label: '1% Low 帧率' },
-                        { key: 'vram' as const, label: '显存占用' },
-                        { key: 'disk' as const, label: '磁盘读写' },
-                        { key: 'cpu_freq' as const, label: 'CPU 频率' },
-                        { key: 'gpu_freq' as const, label: 'GPU 频率' },
-                        { key: 'gpu_power' as const, label: 'GPU 功耗' },
-                      ].map(item => (
-                        <div
-                          key={item.key}
-                          className="flex items-center rounded-lg transition-colors border px-3.5 py-2.5 bg-[var(--color-bg-input)] border-[var(--color-border)]"
-                        >
-                          <Checkbox
-                            checked={localSettings.display_items[item.key]}
-                            onChange={value => handleDisplayItemChange(item.key, value)}
-                            label={item.label}
-                          />
-                        </div>
-                      ))}
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-sm font-medium text-[var(--color-text-primary)]">显示项目</p>
+                      <p className="text-[11px] text-[var(--color-text-muted)]">
+                        按住左侧 ⋮⋮ 拖动调整悬浮窗中的显示顺序，也可使用 ↑ ↓
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {resolveItemOrder(localSettings.item_order).map((key, idx, arr) => {
+                        const isDragging = draggingKey === key;
+                        return (
+                          <div
+                            key={key}
+                            ref={el => {
+                              if (el) rowRefs.current.set(key, el);
+                              else rowRefs.current.delete(key);
+                            }}
+                            className="flex items-center justify-between rounded-lg border px-3.5 py-2 bg-[var(--color-bg-input)] border-[var(--color-border)] select-none"
+                            style={isDragging ? { opacity: 0.4 } : undefined}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              {/* 拖拽把手：按住后通过 Pointer 事件实时换位 */}
+                              <div
+                                onPointerDown={handleGripPointerDown(key)}
+                                onPointerMove={handleGripPointerMove}
+                                onPointerUp={endDrag}
+                                onLostPointerCapture={endDrag}
+                                title="按住拖动排序"
+                                className="w-6 h-8 -mx-1 flex items-center justify-center rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover,rgba(255,255,255,0.06))] cursor-grab active:cursor-grabbing shrink-0 select-none touch-none"
+                              >
+                                <GripVertical className="w-4 h-4" />
+                              </div>
+                              <Checkbox
+                                checked={
+                                  localSettings.display_items[
+                                    key as keyof typeof localSettings.display_items
+                                  ]
+                                }
+                                onChange={value => handleDisplayItemChange(key, value)}
+                                label={ITEM_LABELS[key]}
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleMoveItem(key, -1)}
+                                disabled={idx === 0}
+                                title="上移"
+                                className="w-7 h-7 flex items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] hover:border-[var(--color-border-light)] disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleMoveItem(key, 1)}
+                                disabled={idx === arr.length - 1}
+                                title="下移"
+                                className="w-7 h-7 flex items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] hover:border-[var(--color-border-light)] disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -389,7 +488,7 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave }: Setting
                       })}
                     </div>
                   </div>
-                </div>
+                </motion.div>
 
                 {/* 底部按钮 */}
                 <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)] bg-[var(--color-bg-sidebar)]">
@@ -407,7 +506,8 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave }: Setting
                   </button>
                 </div>
               </motion.div>
-            </Dialog.Content>
+              </Dialog.Content>
+            </div>
           </Dialog.Portal>
         )}
       </AnimatePresence>

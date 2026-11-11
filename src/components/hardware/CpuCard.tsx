@@ -16,6 +16,7 @@ interface CpuCardProps {
   usageHistory: number[];
 }
 
+/** 硬件概览页 CPU 卡片：占用/温度/频率/核心线程数 */
 export function CpuCard({ cpu, usageHistory }: CpuCardProps) {
   // PawnIO 驱动是否缺失（用于温度不可用时提示引导安装）
   const [driverMissing, setDriverMissing] = useState(false);

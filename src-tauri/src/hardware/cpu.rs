@@ -6,8 +6,26 @@ use sysinfo::{System, Components};
 use super::types::CpuInfo;
 use super::lhm;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
+use windows::core::w;
+use windows::Win32::System::Performance::{
+    PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterValue,
+    PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY,
+};
+
+/// PDH CPU 频率计数器状态（惰性初始化，进程生命周期内复用）
+struct CpuFreqPdhState {
+    query: PDH_HQUERY,
+    counter: PDH_HCOUNTER,
+}
+// windows crate 句柄 newtype 未声明 Send，PDH 句柄跨线程使用由下方 Mutex 串行化
+unsafe impl Send for CpuFreqPdhState {}
+
+static CPU_FREQ_PDH: Lazy<Mutex<Option<CpuFreqPdhState>>> = Lazy::new(|| Mutex::new(None));
+/// 初始化失败标记（如计数器不存在），避免每秒反复重试
+static CPU_FREQ_INIT_FAILED: AtomicBool = AtomicBool::new(false);
 
 /// CPU 温度缓存（WMI 查询较慢，避免每次实时刷新都查询）
 struct TempCache {
@@ -37,9 +55,10 @@ pub fn get_cpu_info(sys: &System) -> CpuInfo {
         .map(|cpu| cpu.brand().to_string())
         .unwrap_or_else(|| "Unknown CPU".to_string());
     
-    // 计算平均频率
-    let frequency = if !cpus.is_empty() {
-        cpus.iter().map(|cpu| cpu.frequency()).sum::<u64>() / cpus.len() as u64
+    // 计算平均频率：PDH 实际睿频频率（与 OSD 同口径），失败回退标称基频
+    let base = avg_base_freq(sys);
+    let frequency = if base != 0 {
+        pdh_cpu_frequency(base).unwrap_or(base)
     } else {
         0
     };
@@ -72,13 +91,74 @@ pub fn get_cpu_usage(sys: &System) -> f32 {
     sys.global_cpu_usage()
 }
 
-/// 获取当前 CPU 频率（MHz，所有核心平均，与概览页口径一致）
+/// 获取当前 CPU 频率（MHz，所有核心平均）
+///
+/// sysinfo 在 Windows 上的 frequency 是 WMI 静态基频（恒不随睿频变化，会显示成恒定 2304MHz）。
+/// 改用 PDH 计数器 `\Processor Information(_Total)\% Processor Performance`：
+/// 实际频率 = 基频 × 性能百分比。基频取 sysinfo 报告的标称值。
+/// 计数器需要两次采集间隔才有值，首次调用返回 None（OSD 显示 --）。
 pub fn get_cpu_frequency(sys: &System) -> Option<u64> {
-    let cpus = sys.cpus();
-    if cpus.is_empty() {
+    let base = avg_base_freq(sys);
+    if base == 0 {
         return None;
     }
-    Some(cpus.iter().map(|cpu| cpu.frequency()).sum::<u64>() / cpus.len() as u64)
+    pdh_cpu_frequency(base)
+}
+
+/// 全核标称基频（MHz，sysinfo 报告的 WMI 静态基频）
+fn avg_base_freq(sys: &System) -> u64 {
+    let cpus = sys.cpus();
+    if cpus.is_empty() {
+        return 0;
+    }
+    cpus.iter().map(|cpu| cpu.frequency()).sum::<u64>() / cpus.len() as u64
+}
+
+/// PDH 性能百分比 × 基频 = 实际全核平均频率（MHz）
+fn pdh_cpu_frequency(base: u64) -> Option<u64> {
+    if CPU_FREQ_INIT_FAILED.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    let Ok(mut guard) = CPU_FREQ_PDH.lock() else { return None };
+    if guard.is_none() {
+        let mut query = PDH_HQUERY::default();
+        if unsafe { PdhOpenQueryW(None, 0, &mut query) } != 0 {
+            CPU_FREQ_INIT_FAILED.store(true, Ordering::Relaxed);
+            return None;
+        }
+
+        let mut counter = PDH_HCOUNTER::default();
+        if unsafe {
+            PdhAddEnglishCounterW(
+                query,
+                w!("\\Processor Information(_Total)\\% Processor Performance"),
+                0,
+                &mut counter,
+            )
+        } != 0
+        {
+            unsafe { PdhCloseQuery(query) };
+            CPU_FREQ_INIT_FAILED.store(true, Ordering::Relaxed);
+            return None;
+        }
+
+        *guard = Some(CpuFreqPdhState { query, counter });
+    }
+    let state = guard.as_ref()?;
+
+    unsafe { PdhCollectQueryData(state.query) };
+
+    let mut value = PDH_FMT_COUNTERVALUE::default();
+    let status = unsafe { PdhGetFormattedCounterValue(state.counter, PDH_FMT_DOUBLE, None, &mut value) };
+    if status != 0 || value.CStatus != 0 {
+        return None;
+    }
+    let perf_pct = unsafe { value.Anonymous.doubleValue };
+    if !(1.0..1000.0).contains(&perf_pct) {
+        return None;
+    }
+    Some((base as f64 * perf_pct / 100.0) as u64)
 }
 
 /// 获取 CPU 温度

@@ -145,6 +145,8 @@ pub struct RealtimeStats {
     pub cpu_temp: Option<f32>,
     /// CPU 当前频率 (MHz)
     pub cpu_frequency: Option<u64>,
+    /// CPU 封装功耗 (W)
+    pub cpu_power: Option<f32>,
     /// GPU 使用率 (0-100)
     pub gpu_usage: f32,
     /// GPU 温度
@@ -207,6 +209,9 @@ pub struct MonitorSettings {
     pub opacity: u8,
     /// 面板文字大小 (px, 10-20)
     pub font_size: u8,
+    /// 显示项目顺序（自定义排序；为空表示使用默认顺序）
+    #[serde(default)]
+    pub item_order: Vec<String>,
 }
 
 /// 监控面板位置
@@ -243,12 +248,18 @@ pub struct DisplayItems {
     pub cpu: bool,
     /// 显示 CPU 温度
     pub cpu_temp: bool,
+    /// 显示 CPU 功耗
+    #[serde(default = "default_true")]
+    pub cpu_power: bool,
     /// 显示 GPU 使用率
     pub gpu: bool,
     /// 显示 GPU 温度
     pub gpu_temp: bool,
-    /// 显示内存使用率
+    /// 显示内存占用百分比
     pub memory: bool,
+    /// 显示内存具体占用（已用/总量）
+    #[serde(default = "default_true")]
+    pub memory_cap: bool,
     /// 显示网络速率
     pub network: bool,
     /// 显示帧率
@@ -256,9 +267,12 @@ pub struct DisplayItems {
     /// 显示 1% Low FPS（帧时间 99 百分位换算）
     #[serde(default)]
     pub fps_1pct: bool,
-    /// 显示显存占用（已用/总量）
+    /// 显示显存占用百分比
     #[serde(default)]
     pub vram: bool,
+    /// 显示显存具体占用（已用/总量）
+    #[serde(default = "default_true")]
+    pub vram_cap: bool,
     /// 显示磁盘读写速率
     #[serde(default)]
     pub disk: bool,
@@ -273,19 +287,27 @@ pub struct DisplayItems {
     pub gpu_power: bool,
 }
 
+/// serde 默认值辅助：新增的 CPU 功耗项对旧配置默认开启
+fn default_true() -> bool {
+    true
+}
+
 impl Default for DisplayItems {
     fn default() -> Self {
         DisplayItems {
             cpu: true,
             cpu_temp: false,
+            cpu_power: true,
             gpu: true,
             gpu_temp: true,
             memory: true,
+            memory_cap: true,
             network: true,
             fps: false,
             // 游戏加加核心指标默认开启（频率/功耗默认关，避免悬浮窗过长）
             fps_1pct: true,
             vram: true,
+            vram_cap: true,
             disk: true,
             cpu_freq: false,
             gpu_freq: false,
@@ -303,6 +325,7 @@ impl Default for MonitorSettings {
             refresh_interval: 1000,
             opacity: 80,
             font_size: 12,
+            item_order: Vec::new(),
         }
     }
 }

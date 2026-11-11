@@ -7,7 +7,7 @@
 
 pub mod hardware;
 
-use hardware::types::{HardwareOverview, RealtimeStats, MonitorSettings, MonitorPosition};
+use hardware::types::{HardwareOverview, RealtimeStats, MonitorSettings};
 use std::sync::Mutex;
 use std::fs;
 use std::path::PathBuf;
@@ -31,8 +31,13 @@ fn load_settings_from_file() -> MonitorSettings {
     let path = get_config_path();
     if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(settings) = serde_json::from_str(&content) {
-                return settings;
+            match serde_json::from_str::<MonitorSettings>(&content) {
+                Ok(settings) => return settings,
+                Err(_) => {
+                    // 文件损坏：备份原文件再回退默认，避免下次保存覆盖丢失用户配置
+                    let bak = path.with_extension("json.bak");
+                    let _ = fs::copy(&path, &bak);
+                }
             }
         }
     }
@@ -50,7 +55,7 @@ fn save_settings_to_file(settings: &MonitorSettings) -> Result<(), String> {
 }
 
 /// 全局监控设置
-static MONITOR_SETTINGS: Lazy<Mutex<MonitorSettings>> = Lazy::new(|| {
+pub static MONITOR_SETTINGS: Lazy<Mutex<MonitorSettings>> = Lazy::new(|| {
     Mutex::new(load_settings_from_file())
 });
 
@@ -114,70 +119,51 @@ async fn update_monitor_settings(
     use tauri::Emitter;
     let _ = app.emit("settings-changed", &settings);
     
-    // 位置/字号变化时同步调整悬浮窗口尺寸（容器随字号自适应，幂等）
-    if let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) {
-        let _ = update_overlay_position(&window, &settings.position);
-    }
-    
     Ok(())
 }
 
 /// 显示游戏内监控悬浮窗口
 #[tauri::command]
 async fn show_overlay_window(app: tauri::AppHandle) -> Result<(), String> {
-    let settings = MONITOR_SETTINGS.lock()
-        .map_err(|e| format!("Failed to lock settings: {}", e))?
-        .clone();
-    
-    // 如果窗口已存在，直接显示
+    // 如果窗口已存在，直接显示（位置由前端 CSS 依据 settings.position 吸附到屏幕边缘）
     if let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) {
         window.show().map_err(|e| e.to_string())?;
-        update_overlay_position(&window, &settings.position)?;
         return Ok(());
     }
-    
-    // 获取主显示器信息
-    let monitor = app.primary_monitor()
+
+    // 悬浮窗为整屏透明层：面板位置由前端 CSS 吸附定位，鼠标完全穿透
+    let monitor = app
+        .primary_monitor()
         .map_err(|e| e.to_string())?
         .ok_or("No primary monitor found")?;
-    
     let screen_size = monitor.size();
     let scale_factor = monitor.scale_factor();
-    
-    // 计算窗口尺寸（根据位置、显示项与字号调整，紧凑尺寸）
-    let (width, height) = overlay_window_size(&settings.position, &settings);
-    let (width, height) = (width as i32, height as i32);
-    
-    // 计算窗口位置
-    let (x, y) = calculate_overlay_position(
-        &settings.position,
-        screen_size.width as f64 / scale_factor,
-        screen_size.height as f64 / scale_factor,
-        width as f64,
-        height as f64,
-    );
-    
-    // 创建悬浮窗口
+    let width = screen_size.width as f64 / scale_factor;
+    let height = screen_size.height as f64 / scale_factor;
+
     let window = WebviewWindowBuilder::new(
         &app,
         OVERLAY_WINDOW_LABEL,
         WebviewUrl::App("overlay.html".into()),
     )
     .title("NanoStat Monitor")
-    .inner_size(width as f64, height as f64)
-    .position(x, y)
+    .inner_size(width, height)
+    .position(0.0, 0.0)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(false)
     .focused(false)
+    // 关键：无边框窗口默认阴影会让 tao 把窗口外扩一圈隐形边距、内容内缩，
+    // 导致面板内容不贴屏幕边缘（透明窗口阴影本身不可见，肉眼只见“留缝”）
+    .shadow(false)
     .build()
     .map_err(|e| e.to_string())?;
-    
-    // 设置窗口透明度
+
+    // 整层鼠标穿透，游戏操作不受影响
     window.set_ignore_cursor_events(true).ok();
-    
+
     Ok(())
 }
 
@@ -190,128 +176,12 @@ async fn hide_overlay_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 更新悬浮窗口位置
-#[tauri::command]
-async fn update_overlay_position_cmd(app: tauri::AppHandle, position: MonitorPosition) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) {
-        update_overlay_position(&window, &position)?;
-    }
-    Ok(())
-}
-
-/// 计算悬浮窗口位置
-fn calculate_overlay_position(
-    position: &MonitorPosition,
-    screen_width: f64,
-    screen_height: f64,
-    window_width: f64,
-    window_height: f64,
-) -> (f64, f64) {
-    // 边距：给悬浮窗保留明确的屏幕外沿呼吸空间
-    let margin = 16.0;
-    match position {
-        MonitorPosition::TopCenter => (
-            (screen_width - window_width) / 2.0,
-            margin,
-        ),
-        MonitorPosition::BottomCenter => (
-            (screen_width - window_width) / 2.0,
-            screen_height - window_height - margin,
-        ),
-        MonitorPosition::LeftCenter => (
-            margin,
-            (screen_height - window_height) / 2.0,
-        ),
-        MonitorPosition::RightCenter => (
-            screen_width - window_width - margin,
-            (screen_height - window_height) / 2.0,
-        ),
-        MonitorPosition::TopLeft => (margin, margin),
-        MonitorPosition::TopRight => (screen_width - window_width - margin, margin),
-        MonitorPosition::BottomLeft => (margin, screen_height - window_height - margin),
-        MonitorPosition::BottomRight => (
-            screen_width - window_width - margin,
-            screen_height - window_height - margin,
-        ),
-    }
-}
-
-/// 根据位置、显示项数量与文字大小返回窗口尺寸（容器随内容自适应，保证不裁剪）
-fn overlay_window_size(position: &MonitorPosition, settings: &MonitorSettings) -> (f64, f64) {
-    // 字号范围 10-20，超出时钳制（默认 12）
-    let fs = settings.font_size.clamp(10, 20) as f64;
-    // 启用的显示项数量（决定水平宽度 / 垂直高度）
-    let d = &settings.display_items;
-    let n = [
-        d.cpu, d.cpu_temp, d.gpu, d.gpu_temp, d.memory, d.network, d.fps,
-        d.fps_1pct, d.vram, d.disk, d.cpu_freq, d.gpu_freq, d.gpu_power,
-    ]
-    .iter()
-    .filter(|v| **v)
-    .count()
-    .max(1) as f64;
-
-    match position {
-        // 水平条（上下中 + 四角）：
-        // 宽度 = padding 28px + 每项约 5.5em + 项间距 1.1em×(n-1)，
-        // 每项内容（标签+数值）按 7.0em 估算（含中文标签余量），随字号线性增长
-        MonitorPosition::TopCenter
-        | MonitorPosition::BottomCenter
-        | MonitorPosition::TopLeft
-        | MonitorPosition::TopRight
-        | MonitorPosition::BottomLeft
-        | MonitorPosition::BottomRight => {
-            let width = 28.0 + fs * (7.0 * n - 1.1);
-            (width, fs * 2.4 + 14.0)
-        }
-        // 垂直条（左右中）：
-        // 高度按实际 CSS 行高与行间距估算，避免窗口比内容高出一大截。
-        MonitorPosition::LeftCenter | MonitorPosition::RightCenter => {
-            let width = 28.0 + fs * 7.0;
-            let height = 18.0 + n * (fs * 1.2) + (n - 1.0) * (fs * 0.35);
-            (width, height)
-        }
-    }
-}
-
-/// 更新悬浮窗口位置的辅助函数
-fn update_overlay_position(window: &tauri::WebviewWindow, position: &MonitorPosition) -> Result<(), String> {
-    // 读取当前设置的文字大小，窗口尺寸随字号自适应
-    let settings = MONITOR_SETTINGS.lock()
-        .map_err(|e| format!("Failed to lock settings: {}", e))?
-        .clone();
-    
-    let monitor = window.primary_monitor()
-        .map_err(|e| e.to_string())?
-        .ok_or("No primary monitor found")?;
-    
-    let screen_size = monitor.size();
-    let scale_factor = monitor.scale_factor();
-    
-    // 根据位置、显示项与字号调整窗口尺寸
-    let (width, height) = overlay_window_size(position, &settings);
-    
-    // 先设置窗口尺寸
-    window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(width, height)))
-        .map_err(|e| e.to_string())?;
-    
-    let (x, y) = calculate_overlay_position(
-        position,
-        screen_size.width as f64 / scale_factor,
-        screen_size.height as f64 / scale_factor,
-        width,
-        height,
-    );
-    
-    window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)))
-        .map_err(|e| e.to_string())?;
-    
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 应用入口：构建 Tauri 应用（窗口/托盘/命令注册/启动采集），并处理退出清理
 pub fn run() {
-    tauri::Builder::default()
+
+
+    let built_app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -323,7 +193,6 @@ pub fn run() {
             update_monitor_settings,
             show_overlay_window,
             hide_overlay_window,
-            update_overlay_position_cmd,
         ])
         .setup(|app| {
             // 启动页切换：前端就绪后关闭 splash、显示主窗口（带 8s 超时兜底）
@@ -415,6 +284,14 @@ pub fn run() {
             
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // 退出清理：停掉 PresentMon 子进程与残留 ETW 实时会话
+    // （实时会话在进程被强杀后会残留，堆积会拖慢系统）
+    built_app.run(|_app, event| {
+        if let tauri::RunEvent::Exit = event {
+            hardware::fps::stop_all_trace_sessions();
+        }
+    });
 }

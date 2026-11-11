@@ -8,15 +8,17 @@ import { HardwareOverviewSection } from '../components/hardware/HardwareOverview
 import { CpuCard, GpuCard, MemoryCard, DiskCard, NetworkCard } from '../components/hardware';
 import { Clock, RefreshCw } from 'lucide-react';
 
+/** 主页（硬件信息总览） */
 export function HomePage() {
   const { overview, realtime, cpuHistory, gpuHistory, loading, error, refresh } = useHardwareData(1000);
 
-  // 概览中的静态信息 + 实时的使用率/温度（overview 只低频刷新，使用率须用实时数据）
+  // 概览中的静态信息 + 实时的使用率/温度/频率（overview 只低频刷新，动态项须用实时数据）
   const liveCpu = overview
     ? {
         ...overview.cpu,
         usage: realtime?.cpu_usage ?? overview.cpu.usage,
         temperature: realtime?.cpu_temp ?? overview.cpu.temperature,
+        frequency: realtime?.cpu_frequency ?? overview.cpu.frequency,
       }
     : null;
 
@@ -25,6 +27,7 @@ export function HomePage() {
         ...overview.gpu,
         usage: realtime?.gpu_usage ?? overview.gpu.usage,
         temperature: realtime?.gpu_temp ?? overview.gpu.temperature,
+        core_clock: realtime?.gpu_clock ?? overview.gpu.core_clock,
       }
     : null;
 

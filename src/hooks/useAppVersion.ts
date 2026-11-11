@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 
+/** 应用版本号 Hook（读取 package.json 版本） */
 export function useAppVersion() {
   const [version, setVersion] = useState<string>('');
 

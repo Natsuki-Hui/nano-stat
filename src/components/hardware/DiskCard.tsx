@@ -11,6 +11,7 @@ interface DiskCardProps {
   disks: DiskInfo[];
 }
 
+/** 硬件概览页磁盘卡片：容量/类型/可用空间 */
 export function DiskCard({ disks }: DiskCardProps) {
   return (
     <div className="card" style={{ padding: '16px' }}>

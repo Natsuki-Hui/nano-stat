@@ -89,10 +89,11 @@ export function useHardwareData(refreshInterval = 1000): UseHardwareDataResult {
     // 初始加载
     refresh();
 
-    // 定时刷新：只拉取实时数据（概览静态信息仅在手动刷新时更新）
+    // 定时刷新：只拉取实时数据（概览静态信息仅在手动刷新时更新）；
+    // 间隔 250ms 下限防护，配置异常值不会打爆主进程
     intervalRef.current = window.setInterval(() => {
       fetchRealtime();
-    }, refreshInterval);
+    }, Math.max(250, refreshInterval));
 
     return () => {
       if (intervalRef.current) {

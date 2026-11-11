@@ -15,6 +15,7 @@ interface TitleBarProps {
   title: string;
 }
 
+/** 自定义标题栏（应用名 + 最小化/关闭按钮，无边框窗口） */
 export function TitleBar({ onOpenSettings, title }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
 

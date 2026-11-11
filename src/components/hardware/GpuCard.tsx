@@ -14,6 +14,7 @@ interface GpuCardProps {
   usageHistory: number[];
 }
 
+/** 硬件概览页显卡卡片：占用/显存/温度/频率/功耗/驱动 */
 export function GpuCard({ gpu, usageHistory }: GpuCardProps) {
   // 将历史数据转换为图表格式
   const chartData = usageHistory.map((value, index) => ({

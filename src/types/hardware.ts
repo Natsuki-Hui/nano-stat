@@ -145,6 +145,8 @@ export interface RealtimeStats {
   cpu_temp: number | null;
   /** CPU 当前频率 (MHz) */
   cpu_frequency: number | null;
+  /** CPU 封装功耗 (W) */
+  cpu_power: number | null;
   /** GPU 使用率 (0-100) */
   gpu_usage: number;
   /** GPU 温度 */
@@ -198,20 +200,26 @@ export interface DisplayItems {
   cpu: boolean;
   /** 显示 CPU 温度 */
   cpu_temp: boolean;
+  /** 显示 CPU 功耗 */
+  cpu_power: boolean;
   /** 显示 GPU 使用率 */
   gpu: boolean;
   /** 显示 GPU 温度 */
   gpu_temp: boolean;
-  /** 显示内存使用率 */
+  /** 显示内存占用百分比 */
   memory: boolean;
+  /** 显示内存具体占用（已用/总量） */
+  memory_cap: boolean;
   /** 显示网络速率 */
   network: boolean;
   /** 显示帧率 */
   fps: boolean;
   /** 显示 1% Low FPS */
   fps_1pct: boolean;
-  /** 显示显存占用 */
+  /** 显示显存占用百分比 */
   vram: boolean;
+  /** 显示显存具体占用（已用/总量） */
+  vram_cap: boolean;
   /** 显示磁盘读写速率 */
   disk: boolean;
   /** 显示 CPU 频率 */
@@ -236,4 +244,6 @@ export interface MonitorSettings {
   opacity: number;
   /** 面板文字大小 (px, 10-20) */
   font_size: number;
+  /** 显示项目顺序（自定义排序；空数组 = 默认顺序） */
+  item_order: string[];
 }

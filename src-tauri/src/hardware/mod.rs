@@ -60,6 +60,8 @@ pub fn get_realtime_stats() -> RealtimeStats {
     let is_game_active = game::is_game_active();
     fps::set_target_pid(game::get_foreground_pid());
     fps::settle_fps();
+    // bridge 崩溃自愈：lhm-bridge 意外退出后每秒检查并自动重启
+    lhm::ensure_alive();
 
     // GPU 实时补充指标（NVML：显存/频率/功耗）
     let (vram_used, vram_total, gpu_clock, gpu_power) = gpu::get_gpu_extra();
@@ -73,6 +75,8 @@ pub fn get_realtime_stats() -> RealtimeStats {
         cpu_usage: cpu::get_cpu_usage(&sys),
         cpu_temp: cpu::get_cpu_temperature(&sys),
         cpu_frequency: cpu::get_cpu_frequency(&sys),
+        // CPU 封装功耗（LHM，需 PawnIO；不可用时为 None，前端显示 --）
+        cpu_power: lhm::get_cpu_power(),
         gpu_usage: gpu::get_gpu_usage(),
         gpu_temp: gpu::get_gpu_temperature(),
         gpu_clock,

@@ -26,6 +26,19 @@ static LAST_NETWORK_DATA: Lazy<Mutex<LastNetworkData>> = Lazy::new(|| {
     })
 });
 
+/// 判断是否为虚拟/回环网络接口（其流量会镜像物理网卡，计入会虚高翻倍）
+fn is_virtual_interface(name: &str) -> bool {
+    let n = name.to_lowercase();
+    n.contains("vethernet")
+        || n.contains("loopback")
+        || n.contains("pseudo-interface")
+        || n.contains("wfp")
+        || n.contains("tap")
+        || n.contains("virtual")
+        || n.contains("bluetooth")
+        || n.contains("wan miniport")
+}
+
 /// 获取网络信息
 pub fn get_network_info(_sys: &System) -> NetworkInfo {
     let networks = Networks::new_with_refreshed_list();
@@ -33,7 +46,10 @@ pub fn get_network_info(_sys: &System) -> NetworkInfo {
     let now = std::time::Instant::now();
     let elapsed = now.duration_since(last_data.timestamp).as_secs_f64();
     
-    let interfaces: Vec<NetworkInterface> = networks.iter().map(|(name, data)| {
+    let interfaces: Vec<NetworkInterface> = networks
+        .iter()
+        .filter(|(name, _)| !is_virtual_interface(name))
+        .map(|(name, data)| {
         let rx_bytes = data.total_received();
         let tx_bytes = data.total_transmitted();
         
@@ -79,6 +95,9 @@ pub fn get_network_stats(_sys: &System) -> NetworkStats {
     let mut total_tx_rate = 0.0;
     
     for (name, data) in networks.iter() {
+        if is_virtual_interface(name) {
+            continue;
+        }
         let rx_bytes = data.total_received();
         let tx_bytes = data.total_transmitted();
         

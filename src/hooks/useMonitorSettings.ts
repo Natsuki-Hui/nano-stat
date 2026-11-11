@@ -14,13 +14,16 @@ const defaultSettings: MonitorSettings = {
   display_items: {
     cpu: true,
     cpu_temp: false,
+    cpu_power: true,
     gpu: true,
     gpu_temp: true,
     memory: true,
+    memory_cap: true,
     network: true,
     fps: false,
     fps_1pct: true,
     vram: true,
+    vram_cap: true,
     disk: true,
     cpu_freq: false,
     gpu_freq: false,
@@ -29,6 +32,7 @@ const defaultSettings: MonitorSettings = {
   refresh_interval: 1000,
   opacity: 80,
   font_size: 12,
+  item_order: [],
 };
 
 interface UseMonitorSettingsResult {

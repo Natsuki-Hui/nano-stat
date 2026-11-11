@@ -60,6 +60,7 @@ function generateHardwareInfoText(data: HardwareOverview): string {
   return lines.join('\n');
 }
 
+/** 硬件概览区：组合 CPU/GPU/内存/存储/网络 卡片并轮询实时数据 */
 export function HardwareOverviewSection({ data }: HardwareOverviewSectionProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [copied, setCopied] = useState(false);

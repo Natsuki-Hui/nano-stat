@@ -11,6 +11,7 @@ import wechatQr from '../assets/r_wechat_qr.jpg';
 import alipayQr from '../assets/r_alipay_qr.jpg';
 import avatar from '../assets/avatar.png';
 
+/** 关于页：版本信息/开源地址/捐赠 */
 export function AboutPage() {
   const appVersion = useAppVersion();
   // 打赏码放大预览（null=未打开）

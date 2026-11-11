@@ -1,0 +1,112 @@
+/**
+ * 监控条样式（OSD 悬浮窗与设置页预览共用）
+ *
+ * 本文件只包含监控条本体的样式；
+ * overlay.css 通过 @import 引用同一份，保证 OSD 与设置页预览渲染一致。
+ */
+
+/* 内置字体：Noto Sans SC（思源黑体，SIL OFL 1.1 免费商用可分发），
+   按 OSD 用到的字形子集化（scripts/subset-fonts.py），全部仅 ~35KB。
+   统一字体后中英文行盒 metrics 一致，不再出现 Segoe/雅黑混排的高低参差 */
+@font-face {
+  font-family: 'NanoStat Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('../assets/fonts/noto-sans-sc-latin-400-normal.woff2') format('woff2'),
+       url('../assets/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'NanoStat Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url('../assets/fonts/noto-sans-sc-latin-500-normal.woff2') format('woff2'),
+       url('../assets/fonts/noto-sans-sc-chinese-simplified-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'NanoStat Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('../assets/fonts/noto-sans-sc-latin-700-normal.woff2') format('woff2'),
+       url('../assets/fonts/noto-sans-sc-chinese-simplified-700-normal.woff2') format('woff2');
+}
+
+/* 监控条容器：半透明深色圆角条（游戏加加风格），文字始终不透明 */
+.overlay-panel {
+  width: max-content;
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  background: rgba(12, 12, 14, var(--panel-bg-alpha, 0.8));
+  border-radius: 3px;
+  color: #f7fafc !important;
+  /* 文字大小由设置注入（--panel-font-size），行高锁定为字号的 1.35 倍 */
+  font-size: var(--panel-font-size, 12px);
+  line-height: calc(var(--panel-font-size, 12px) * 1.35);
+  font-family: 'NanoStat Sans', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 背景略高于字形（贴字风格但文字不贴边），左右保留呼吸空间 */
+  padding: 0 0.9em;
+}
+
+/* 水平布局（顶部/底部/四角）：块间距即指标分组间隙 */
+.overlay-horizontal {
+  flex-direction: row;
+  gap: 0.9em;
+}
+
+/* 垂直布局（左侧/右侧） */
+.overlay-vertical {
+  flex-direction: column;
+  height: auto;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.35em;
+}
+
+/* 监控块：透明（底色由面板承担），仅承担布局分组 */
+.monitor-block {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  line-height: inherit;
+}
+
+/* 块内单个指标分组（标签 + 数值）的紧凑间隙 */
+.monitor-seg {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  line-height: inherit;
+}
+
+/* 标签：纯白（对齐游戏加加，非灰色） */
+.monitor-label {
+  color: #f5f5f7;
+  font-size: 1em;
+  font-weight: 700;
+  line-height: inherit;
+}
+
+.monitor-value {
+  font-weight: 700;
+  font-size: 1em;
+  line-height: inherit;
+  /* 等宽数字：数值刷新时数字宽度不变，整条不左右抖动 */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* 颜色类：对齐游戏加加四色系（绿=FPS/低占用 黄=温度 蓝=频率/功耗/容量 红=高占用） */
+.text-cpu { color: #47d179; }
+.text-gpu { color: #47d179; }
+.text-temp { color: #d1bc47; }
+.text-memory { color: #7bc477; }
+.text-network { color: #477fd1; }
+.text-fps { color: #47d179; }
+.text-power { color: #477fd1; }

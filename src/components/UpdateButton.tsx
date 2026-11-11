@@ -21,6 +21,7 @@ interface UpdateButtonProps {
   autoCheck?: boolean;
 }
 
+/** 主窗口顶部的手动刷新按钮（触发检查更新） */
 export function UpdateButton({ variant = 'full', autoCheck = true }: UpdateButtonProps) {
   const {
     updateInfo,

@@ -18,6 +18,7 @@ interface CheckboxProps {
   disabled?: boolean;
 }
 
+/** 通用勾选框组件（label + 状态） */
 export function Checkbox({ checked, onChange, label, size = 18, disabled = false }: CheckboxProps) {
   return (
     <label

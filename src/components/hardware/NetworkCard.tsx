@@ -30,6 +30,7 @@ function formatRate(bytesPerSec: number): string {
   return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
 }
 
+/** 硬件概览页网络卡片：各网卡实时上下行速率 */
 export function NetworkCard({ network }: NetworkCardProps) {
   // 计算总流量
   const totalRx = network.interfaces.reduce((sum, iface) => sum + iface.rx_bytes, 0);

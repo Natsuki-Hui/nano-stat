@@ -17,6 +17,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 const THEME_STORAGE_KEY = 'nanostat-theme';
 
+/** 主题上下文 Provider（暗色主题） */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     // 从本地存储读取主题设置
@@ -66,6 +67,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** 主题 Hook（当前为暗色固定主题，预留扩展） */
 export function useTheme() {
   const context = useContext(ThemeContext);
   if (context === undefined) {

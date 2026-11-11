@@ -5,8 +5,8 @@
 
 import { Monitor, Settings, RefreshCw, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, ArrowUpLeft, ArrowUpRight, ArrowDownLeft, ArrowDownRight } from 'lucide-react';
 import { useMonitorSettings } from '../hooks/useMonitorSettings';
+import { MonitorBar } from '../components/MonitorBar';
 import { useHardwareData } from '../hooks/useHardwareData';
-import { formatSpeed, formatGb, formatDiskRate } from '../utils/format';
 import type { MonitorPosition } from '../types/hardware';
 
 /** 位置图标映射 */
@@ -45,9 +45,6 @@ const positionClasses: Record<MonitorPosition, string> = {
   BottomRight: 'bottom-2 right-2',
 };
 
-/** 垂直布局位置（仅左右居中） */
-const verticalPositions: MonitorPosition[] = ['LeftCenter', 'RightCenter'];
-
 /** 配置信息行组件（当前配置区复用） */
 function ConfigRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -58,12 +55,12 @@ function ConfigRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
+/** 游戏内监控设置页：开关/排序/位置/透明度等设置入口 */
 export function MonitorPage() {
   const { settings, loading: settingsLoading, refreshSettings } = useMonitorSettings();
   const { realtime } = useHardwareData(1000);
 
   const PositionIcon = positionIcons[settings.position];
-  const isVertical = verticalPositions.includes(settings.position);
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -97,110 +94,11 @@ export function MonitorPage() {
 
         {/* 模拟屏幕（宽度撑满容器，高度固定，预览面板只同步位置/显示项/透明度，字号固定） */}
         <div className="relative rounded-xl overflow-hidden h-[240px] bg-[linear-gradient(160deg,#0b0f16_0%,#111827_60%,#0a0e14_100%)] border border-[#2d3748]">
-          {/* 监控面板预览（仿真实 overlay 样式） */}
+          {/* 监控面板预览：复用真实 OSD 渲染组件（MonitorBar），与游戏内显示完全一致 */}
           <div
-            className={`absolute rounded-md ${positionClasses[settings.position]} border border-[rgba(71,85,105,0.5)] shadow-[0_2px_8px_rgba(0,0,0,0.35)] px-2.5 py-1.5 text-[12px] text-[#f7fafc] max-w-[94%] max-h-[94%] overflow-hidden`}
-            style={{
-              backgroundColor: `rgba(15, 23, 42, ${settings.opacity / 100})`,
-              whiteSpace: isVertical ? 'normal' : 'nowrap',
-            }}
+            className={`absolute max-w-[94%] max-h-[94%] overflow-hidden ${positionClasses[settings.position]}`}
           >
-            <div className={`flex ${isVertical ? 'flex-col gap-0.5' : 'flex-row gap-3'}`}>
-              {settings.display_items.cpu && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">CPU</span>
-                  <span className="font-bold text-[#0ea5e9]">{realtime?.cpu_usage.toFixed(0) || '--'}%</span>
-                </div>
-              )}
-              {settings.display_items.gpu && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">GPU</span>
-                  <span className="font-bold text-[#10b981]">{realtime?.gpu_usage.toFixed(0) || '--'}%</span>
-                </div>
-              )}
-              {settings.display_items.cpu_temp && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">CPU温度</span>
-                  <span className="font-bold text-[#f59e0b]">{realtime?.cpu_temp?.toFixed(0) || '--'}°C</span>
-                </div>
-              )}
-              {settings.display_items.gpu_temp && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">GPU温度</span>
-                  <span className="font-bold text-[#f59e0b]">{realtime?.gpu_temp?.toFixed(0) || '--'}°C</span>
-                </div>
-              )}
-              {settings.display_items.memory && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">内存</span>
-                  <span className="font-bold text-[#a855f7]">
-                    {realtime?.memory_usage.toFixed(0) || '--'}%
-                    {realtime ? ` ${formatGb(realtime.memory_used)}/${formatGb(realtime.memory_total)}` : ''}
-                  </span>
-                </div>
-              )}
-              {settings.display_items.network && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">网络</span>
-                  <span className="font-bold text-[#3b82f6]">↓{formatSpeed(realtime?.network_stats.download_rate ?? 0)}</span>
-                </div>
-              )}
-              {settings.display_items.fps && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">FPS</span>
-                  <span className="font-bold text-[#eab308]">{realtime?.fps != null ? realtime.fps.toFixed(0) : '--'}</span>
-                </div>
-              )}
-              {settings.display_items.fps_1pct && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">1%Low</span>
-                  <span className="font-bold text-[#eab308]">{realtime?.fps_1pct != null ? realtime.fps_1pct.toFixed(0) : '--'}</span>
-                </div>
-              )}
-              {settings.display_items.vram && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">显存</span>
-                  <span className="font-bold text-[#10b981]">
-                    {realtime?.vram_used != null && realtime?.vram_total != null
-                      ? `${formatGb(realtime.vram_used)}/${formatGb(realtime.vram_total)}`
-                      : '--'}
-                  </span>
-                </div>
-              )}
-              {settings.display_items.disk && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">磁盘</span>
-                  <span className="font-bold text-[#3b82f6]">
-                    ↓{realtime?.disk_read_rate != null ? formatDiskRate(realtime.disk_read_rate) : '--'}{' '}
-                    ↑{realtime?.disk_write_rate != null ? formatDiskRate(realtime.disk_write_rate) : '--'}
-                  </span>
-                </div>
-              )}
-              {settings.display_items.cpu_freq && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">CPU频率</span>
-                  <span className="font-bold text-[#0ea5e9]">
-                    {realtime?.cpu_frequency != null ? `${(realtime.cpu_frequency / 1000).toFixed(2)}G` : '--'}
-                  </span>
-                </div>
-              )}
-              {settings.display_items.gpu_freq && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">GPU频率</span>
-                  <span className="font-bold text-[#10b981]">
-                    {realtime?.gpu_clock != null ? `${(realtime.gpu_clock / 1000).toFixed(2)}G` : '--'}
-                  </span>
-                </div>
-              )}
-              {settings.display_items.gpu_power && (
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[#9ca3af]">GPU功耗</span>
-                  <span className="font-bold text-[#f59e0b]">
-                    {realtime?.gpu_power != null ? `${realtime.gpu_power.toFixed(0)}W` : '--'}
-                  </span>
-                </div>
-              )}
-            </div>
+            <MonitorBar settings={settings} stats={realtime} preview />
           </div>
 
           {/* 屏幕中心提示 */}
