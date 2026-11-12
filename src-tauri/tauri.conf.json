@@ -43,8 +43,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "createUpdaterArtifacts": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": false,
     "resources": [
       "lhm-bridge/bin/Release/net8.0/win-x64/publish/lhm-bridge.exe"
     ],

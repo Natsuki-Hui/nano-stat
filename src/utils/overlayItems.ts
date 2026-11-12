@@ -47,6 +47,7 @@ export const ITEM_LABELS: Record<ItemKey, string> = {
 
 /** OSD 合并块首标签：同硬件细项合并后统一显示硬件名（不随首项变化）。
     fps 族例外：各细项（FPS/1%Low/原始帧/帧生成）语义独立，自带标签 */
+/** OSD 合并块首标签映射：cpu/gpu/memory/vram 四族合并后显示的块名 */
 export const ITEM_GROUP_LABELS: Record<'cpu' | 'gpu' | 'memory' | 'vram', string> = {
   cpu: 'CPU',
   gpu: 'GPU',
@@ -101,6 +102,11 @@ const GROUP_EXPANSION: Record<string, ItemKey[]> = {
   disk: ['disk'],
 };
 
+/**
+ * 兼容迁移：将持久化的 item_order 解析为完整细项顺序。
+ * 处理三种历史形态：细项 key（当前）、块级 key（旧合并版）、空/未知（补默认序）；
+ * 新增细项插入同族成员之后，缺失项按默认顺序补齐尾部，统一去重。
+ */
 export function resolveItemOrder(itemOrder?: string[]): ItemKey[] {
   const list = itemOrder ?? [];
   // 含有细项 key 即视为细项粒度配置（块级配置只含 8 个块 key）

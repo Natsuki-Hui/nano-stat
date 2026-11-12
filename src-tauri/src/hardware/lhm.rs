@@ -37,7 +37,9 @@ struct TempSnapshot {
     cpu_temp: Option<f32>,
     #[serde(default)]
     gpu_temp: Option<f32>,
+    /// 主板温度（协议字段：C# 端会输出，Rust 侧暂无 UI 消费者，保留解析容错）
     #[serde(default)]
+    #[allow(dead_code)]
     mb_temp: Option<f32>,
     #[serde(default)]
     cpu_power: Option<f32>,
@@ -301,6 +303,21 @@ fn spawn_bridge(path: PathBuf) {
 /// 获取 CPU 温度/// 获取 CPU 温度（来自 LHM），数据超过 3 秒视为过期返回 None
 pub fn get_cpu_temp() -> Option<f32> {
     let state = LHM_STATE.lock().unwrap();
+    let diag = format!(
+        "[lhm-diag] cpu_temp: h={} driver_missing={} last_update_elapsed={:?} snapshot_cpu={:?}",
+        state.h_process,
+        state.driver_missing,
+        state.last_update.elapsed().as_secs_f64(),
+        state.snapshot.as_ref().and_then(|s| s.cpu_temp)
+    );
+    std::mem::drop(state);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true)
+        .open(std::path::Path::new(&std::env::var("TEMP").unwrap_or_else(|_| ".".into())).join("lhm_diag.log"))
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "{}", diag);
+    }
+    let state = LHM_STATE.lock().unwrap();
     if state.driver_missing || state.h_process == 0 {
         return None;
     }
@@ -320,20 +337,6 @@ pub fn get_gpu_temp() -> Option<f32> {
         return None;
     }
     state.snapshot.as_ref()?.gpu_temp
-}
-
-/// 获取主板温度（预留能力，供后续 UI 扩展展示）
-#[allow(dead_code)]
-/// 读取主板温度传感器（LHM Motherboard 温度，取最高值）
-pub fn get_mb_temp() -> Option<f32> {
-    let state = LHM_STATE.lock().unwrap();
-    if state.driver_missing || state.h_process == 0 {
-        return None;
-    }
-    if state.last_update.elapsed() > Duration::from_secs(3) {
-        return None;
-    }
-    state.snapshot.as_ref()?.mb_temp
 }
 
 /// 获取 CPU 封装功耗（W，来自 LHM Package Power 传感器）

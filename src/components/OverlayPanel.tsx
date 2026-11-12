@@ -39,6 +39,7 @@ const defaultSettings: MonitorSettings = {
   item_order: [],
 };
 
+/** OSD 悬浮面板组件：加载设置、监听变更、轮询实时数据，交给 MonitorBar 渲染 */
 export function OverlayPanel() {
   const [stats, setStats] = useState<RealtimeStats | null>(null);
   const [settings, setSettings] = useState<MonitorSettings>(defaultSettings);
