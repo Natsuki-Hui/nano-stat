@@ -104,7 +104,6 @@ npm run tauri build
 ## Documentation
 
 - [简体中文文档](./README-zh.md)
-- [Changes from upstream](./CHANGES-FROM-UPSTREAM.md)
 
 ## Contributing
 

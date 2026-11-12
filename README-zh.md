@@ -97,7 +97,6 @@ npm run tauri build
 ## 文档
 
 - [English README](./README.md)
-- [与原版的差异说明](./CHANGES-FROM-UPSTREAM.md)
 
 ## 贡献
 
