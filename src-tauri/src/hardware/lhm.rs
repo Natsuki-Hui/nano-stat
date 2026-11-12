@@ -61,7 +61,7 @@ struct LhmState {
     driver_missing: bool,
     /// 缓存的 bridge 可执行文件路径（运行期自动重启用）
     bridge_path: Option<PathBuf>,
-    /// 上次启动时刻（防重启风暴：bridge 崩溃循环时 5 秒内不重复拉起）
+    /// 上次启动时刻（防重启风暴：bridge 崩溃循环时 2 秒内不重复拉起）
     last_start: Option<Instant>,
 }
 
@@ -119,7 +119,7 @@ pub fn ensure_bridge(app: &tauri::AppHandle) {
         if state.h_process != 0 {
             return;
         }
-        // 防重启风暴：bridge 启动后 5 秒内不重复拉起（崩溃循环保护）
+        // 防重启风暴：bridge 启动后 2 秒内不重复拉起（崩溃循环保护）
         if state
             .last_start
             .map(|t| t.elapsed() < Duration::from_secs(5))
@@ -153,10 +153,10 @@ pub fn ensure_alive() {
     if st.h_process != 0 || st.bridge_path.is_none() {
         return;
     }
-    // 防重启风暴：5 秒内不重复拉起
+    // 防重启风暴：2 秒内不重复拉起
     if st
         .last_start
-        .map(|t| t.elapsed() < Duration::from_secs(5))
+        .map(|t| t.elapsed() < Duration::from_secs(2))
         .unwrap_or(false)
     {
         return;
@@ -266,6 +266,8 @@ fn spawn_bridge(path: PathBuf) {
         if let Ok(mut st) = LHM_STATE.lock() {
             st.h_process = pi.hProcess.0 as isize;
             st.h_stdin_write = stdin_w.0 as isize;
+            // 清空旧快照：新 bridge 首帧到达前 OSD 显示 --，不残留重启前的旧值
+            st.snapshot = None;
         }
 
         // 后台线程持续读取并解析 JSON Lines
@@ -300,23 +302,8 @@ fn spawn_bridge(path: PathBuf) {
     }
 }
 
-/// 获取 CPU 温度/// 获取 CPU 温度（来自 LHM），数据超过 3 秒视为过期返回 None
+/// 获取 CPU 温度（来自 LHM），数据超过 3 秒视为过期返回 None
 pub fn get_cpu_temp() -> Option<f32> {
-    let state = LHM_STATE.lock().unwrap();
-    let diag = format!(
-        "[lhm-diag] cpu_temp: h={} driver_missing={} last_update_elapsed={:?} snapshot_cpu={:?}",
-        state.h_process,
-        state.driver_missing,
-        state.last_update.elapsed().as_secs_f64(),
-        state.snapshot.as_ref().and_then(|s| s.cpu_temp)
-    );
-    std::mem::drop(state);
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true)
-        .open(std::path::Path::new(&std::env::var("TEMP").unwrap_or_else(|_| ".".into())).join("lhm_diag.log"))
-    {
-        use std::io::Write;
-        let _ = writeln!(f, "{}", diag);
-    }
     let state = LHM_STATE.lock().unwrap();
     if state.driver_missing || state.h_process == 0 {
         return None;
