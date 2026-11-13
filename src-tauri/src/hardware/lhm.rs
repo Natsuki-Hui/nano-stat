@@ -71,7 +71,10 @@ impl LhmState {
             h_process: 0,
             h_stdin_write: 0,
             snapshot: None,
-            last_update: Instant::now() - Duration::from_secs(60),
+            // last_update 必须初始化为"现在"：
+            // 若初始化为过去（如 now-60s），首次 get_cpu_temp 会误判 stale>10s，
+            // 立刻杀掉刚 spawn 的 bridge，导致每次启动应用后温度永久丢失
+            last_update: Instant::now(),
             driver_missing: false,
             bridge_path: None,
             last_start: None,
@@ -289,9 +292,16 @@ fn spawn_bridge(path: PathBuf) {
                     }
                     continue;
                 }
+                // 开机早期 PawnIO 设备未就绪时，bridge 会输出 cpu_temp=null 的快照。
+                // 关键：null 快照**不更新 last_update**——若更新，stale 判定被持续刷新，
+                // "数据断流自动重启 bridge"的逻辑永不触发，OSD 将永久显示 --°C。
+                // 只在收到**有效温度**时才认为数据链路健康。
+                let has_valid_temp = snap.cpu_temp.is_some() || snap.gpu_temp.is_some();
                 if let Ok(mut state) = LHM_STATE.lock() {
                     state.snapshot = Some(snap);
-                    state.last_update = Instant::now();
+                    if has_valid_temp {
+                        state.last_update = Instant::now();
+                    }
                 }
             }
             // stdout 关闭 = bridge 退出（由 ensure_alive 下次轮询时自动重启）
@@ -304,11 +314,26 @@ fn spawn_bridge(path: PathBuf) {
 
 /// 获取 CPU 温度（来自 LHM），数据超过 3 秒视为过期返回 None
 pub fn get_cpu_temp() -> Option<f32> {
-    let state = LHM_STATE.lock().unwrap();
+    let mut state = LHM_STATE.lock().unwrap();
     if state.driver_missing || state.h_process == 0 {
         return None;
     }
-    if state.last_update.elapsed() > Duration::from_secs(3) {
+    let stale = state.last_update.elapsed();
+    if stale > Duration::from_secs(3) {
+        // 数据断流：短暂断流（<10s）是 bridge 首帧未到，显示 --；
+        // 超过 10s 说明 bridge"活着但拿不到数据"（如开机驱动未就绪卡死），
+        // 杀掉让 ensure_alive 重启（bridge 侧有 15 秒驱动就绪重试）
+        if stale > Duration::from_secs(10) && state.h_process != 0 {
+            unsafe {
+                let _ = windows::Win32::System::Threading::TerminateProcess(
+                    HANDLE(state.h_process as *mut _),
+                    1,
+                );
+                let _ = windows::Win32::Foundation::CloseHandle(HANDLE(state.h_process as *mut _));
+            }
+            state.h_process = 0;
+            state.snapshot = None;
+        }
         return None;
     }
     state.snapshot.as_ref()?.cpu_temp
